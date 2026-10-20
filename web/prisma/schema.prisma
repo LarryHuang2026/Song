@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+}
+datasource db {
+  provider = "sqlite"
+}
+model Project {
+  id String @id @default(uuid())
+  name String
+  lyricsDraft String @default("")
+  promptDraft String @default("{}")
+  selectedVersionId String?
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  versions Version[]
+  jobs GenerationJob[]
+  hums HumAsset[]
+}
+model GenerationJob {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id])
+  provider String
+  model String
+  status String @default("queued")
+  requestParams String
+  sourceJobId String?
+  parentVersionId String?
+  errorMessage String?
+  requestId String?
+  providerSourceId String?
+  providerTaskId String?
+  nextPollAt DateTime?
+  pollStartedAt DateTime?
+  pollFailures Int @default(0)
+  createdAt DateTime @default(now())
+  submittedAt DateTime?
+  finishedAt DateTime?
+  outputs JobOutput[]
+  @@index([status, createdAt])
+}
+model JobOutput {
+  id String @id @default(uuid())
+  jobId String
+  job GenerationJob @relation(fields: [jobId], references: [id])
+  index Int
+  remoteUrl String?
+  providerSongId String?
+  rawAssetPath String?
+  rawMimeType String?
+  assetPath String?
+  receivedBytes Int @default(0)
+  totalBytes Int?
+  status String @default("pending")
+  errorMessage String?
+  version Version?
+  @@unique([jobId, index])
+}
+model Version {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id])
+  outputId String? @unique
+  output JobOutput? @relation(fields: [outputId], references: [id])
+  parentVersionId String?
+  label String
+  sourceType String
+  implementation String
+  provider String
+  model String
+  paramsSnapshot String
+  assetPath String @unique
+  sha256 String
+  mimeType String
+  durationSec Float
+  sampleRate Int
+  channels Int
+  peaks String @default("[]")
+  createdAt DateTime @default(now())
+  @@index([projectId, createdAt])
+}
+model WorkerState {
+  id String @id
+  owner String
+  heartbeatAt DateTime
+}
+
+model HumAsset {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id])
+  label String
+  originalPath String
+  originalSha256 String
+  originalMimeType String
+  originalDurationSec Float
+  assetPath String @unique
+  sha256 String
+  durationSec Float
+  sampleRate Int
+  channels Int
+  peaks String
+  analysisJson String
+  processingJson String
+  createdAt DateTime @default(now())
+  @@index([projectId, createdAt])
+}

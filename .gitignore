@@ -1,0 +1,21 @@
+.env*
+!.env.example
+
+data/
+docs/api-evidence/**/*.mp3
+docs/api-evidence/**/*.wav
+node_modules/
+.next/
+.next-e2e/
+next-env.d.ts
+*.tsbuildinfo
+test-results/
+playwright-report/
+__pycache__/
+.pytest_cache/
+.venv/
+.DS_Store
+web/src/generated/
+
+# 原始 API 调用记录可能包含临时签名地址，仅保留在本机。
+docs/api-evidence/**/result.json

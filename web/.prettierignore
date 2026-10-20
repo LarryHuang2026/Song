@@ -1,0 +1,6 @@
+src/generated/
+.next/
+.next-e2e/
+node_modules/
+test-results/
+playwright-report/
