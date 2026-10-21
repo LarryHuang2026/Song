@@ -53,3 +53,24 @@ export type AiJob = {
     errorMessage: string | null;
   }[];
 };
+
+// A draft may be incomplete or have an unfinished time range. Only real
+// generation requests require a valid source and a complete selection.
+export const aiDraftSchema = z
+  .object({
+    sourceId: z.union([z.string().uuid(), z.literal("")]),
+    title: z.string().max(100),
+    style: z.string().max(1000),
+    model: common.model,
+    lyrics: z.string().max(8000),
+    description: z.string().max(2000),
+    weight: z.number().finite().min(0).max(1),
+    instrumental: z.boolean(),
+    start: z.number().finite().min(-3600).max(3600),
+    end: z.number().finite().min(-3600).max(3600),
+    windowLyrics: z.string().max(4000),
+    infillLyrics: z.string().max(4000),
+    fade: z.number().finite().min(0).max(1000),
+  })
+  .strict();
+export type AiDraft = z.infer<typeof aiDraftSchema>;

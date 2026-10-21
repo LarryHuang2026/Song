@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { db } from "./db";
 import { HttpError, jsonBody } from "./http";
 import { assetPath } from "./audio";
-import { aiRequestSchema } from "./ai-domain";
+import { aiRequestSchema, aiDraftSchema } from "./ai-domain";
 import {
   publicSunoSettings,
   sunoSettings,
@@ -66,6 +66,32 @@ export async function aiPost(request: NextRequest, parts: string[]) {
         e instanceof Error ? e.message : "服务连接验证失败",
       );
     }
+  }
+  if (
+    parts[0] === "projects" &&
+    parts[2] === "ai-draft" &&
+    parts.length === 3
+  ) {
+    const id = z.string().uuid().parse(parts[1]);
+    const { kind, draft } = z
+      .object({
+        kind: z.enum(["hum_cover", "section_rewrite"]),
+        draft: aiDraftSchema,
+      })
+      .parse(await jsonBody(request));
+    const changed = await db.project.updateMany({
+      where: { id, archivedAt: null },
+      data:
+        kind === "hum_cover"
+          ? { aiCoverDraft: JSON.stringify(draft) }
+          : { aiRewriteDraft: JSON.stringify(draft) },
+    });
+    if (!changed.count)
+      throw new HttpError(409, "项目不存在或已归档，AI 草稿未保存");
+    return NextResponse.json(
+      { ok: true },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
   if (parts[0] === "projects" && parts[2] === "ai-jobs" && parts.length === 3) {
     const projectId = z.string().uuid().parse(parts[1]),

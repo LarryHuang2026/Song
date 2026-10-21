@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Sparkles,
   KeyRound,
@@ -11,7 +11,12 @@ import {
   Settings2,
 } from "lucide-react";
 import type { Hum, LocalVersion } from "./local-studio";
-import type { AiJob, AiRequest } from "@/lib/ai-domain";
+import {
+  aiDraftSchema,
+  type AiDraft,
+  type AiJob,
+  type AiRequest,
+} from "@/lib/ai-domain";
 type Settings = {
   configured: boolean;
   verifiedAt: string | null;
@@ -25,6 +30,8 @@ type Project = {
   selectedVersionId: string | null;
   lyricsDraft: string;
   promptDraft: string;
+  aiCoverDraft?: string;
+  aiRewriteDraft?: string;
   hums: Hum[];
   versions: LocalVersion[];
   jobs: AiJob[];
@@ -191,45 +198,154 @@ export default function AiStudio({
   refresh,
   navigate,
   onLockChange,
+  onBeforeLeaveChange,
 }: {
   project: Project;
   kind: AiRequest["kind"];
   refresh: () => Promise<unknown>;
   navigate: (mode: "hums" | "create") => void;
   onLockChange: (locked: boolean) => void;
+  onBeforeLeaveChange: (save: (() => Promise<void>) | null) => void;
 }) {
   const cover = kind === "hum_cover";
   const [settings, setSettings] = useState<Settings | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  const [sourceId, setSourceId] = useState(
-    cover
-      ? project.hums[0]?.id || ""
-      : project.selectedVersionId || project.versions[0]?.id || "",
-  );
-  const [title, setTitle] = useState(project.name),
-    [style, setStyle] = useState(() => {
-      try {
-        return (
-          JSON.parse(project.promptDraft).style || "中文流行，钢琴与木吉他"
-        );
-      } catch {
-        return "中文流行，钢琴与木吉他";
+  const [draft, setDraft] = useState<AiDraft>(() => {
+    let initialStyle = "中文流行，钢琴与木吉他";
+    try {
+      initialStyle = JSON.parse(project.promptDraft).style || initialStyle;
+    } catch {}
+    const baseId = project.selectedVersionId || project.versions[0]?.id || "";
+    const base = project.versions.find((v) => v.id === baseId);
+    const initial: AiDraft = {
+      sourceId: cover ? project.hums[0]?.id || "" : baseId,
+      title: project.name,
+      style: initialStyle,
+      model: "suno-v6",
+      lyrics: project.lyricsDraft,
+      description: "保留参考旋律的走向，创作有完整结构的歌曲",
+      weight: 0.7,
+      instrumental: false,
+      start: 0,
+      end: Math.min(10, base?.durationSec || 10),
+      windowLyrics: "",
+      infillLyrics: "",
+      fade: 30,
+    };
+    try {
+      const saved = JSON.parse(
+        (cover ? project.aiCoverDraft : project.aiRewriteDraft) || "{}",
+      );
+      return aiDraftSchema.parse({ ...initial, ...saved });
+    } catch {
+      return initial;
+    }
+  });
+  const {
+    sourceId,
+    title,
+    style,
+    model,
+    lyrics,
+    description,
+    weight,
+    instrumental,
+    start,
+    end,
+    windowLyrics,
+    infillLyrics,
+    fade,
+  } = draft;
+  const latestDraft = useRef(draft);
+  const savedDraft = useRef(JSON.stringify(draft));
+  const savingDraft = useRef<Promise<void> | null>(null);
+  const [draftStatus, setDraftStatus] = useState<
+    "saved" | "pending" | "saving" | "error"
+  >("saved");
+  const [draftError, setDraftError] = useState("");
+  function updateDraft<K extends keyof AiDraft>(field: K, value: AiDraft[K]) {
+    const next = { ...latestDraft.current, [field]: value };
+    latestDraft.current = next;
+    setDraft(next);
+    setDraftStatus(
+      JSON.stringify(next) === savedDraft.current && !savingDraft.current
+        ? "saved"
+        : "pending",
+    );
+    setDraftError("");
+  }
+  const setSourceId = (value: AiDraft["sourceId"]) =>
+    updateDraft("sourceId", value);
+  const setTitle = (value: AiDraft["title"]) => updateDraft("title", value);
+  const setStyle = (value: AiDraft["style"]) => updateDraft("style", value);
+  const setModel = (value: AiDraft["model"]) => updateDraft("model", value);
+  const setLyrics = (value: AiDraft["lyrics"]) => updateDraft("lyrics", value);
+  const setDescription = (value: AiDraft["description"]) =>
+    updateDraft("description", value);
+  const setWeight = (value: AiDraft["weight"]) => updateDraft("weight", value);
+  const setInstrumental = (value: AiDraft["instrumental"]) =>
+    updateDraft("instrumental", value);
+  const setStart = (value: AiDraft["start"]) => updateDraft("start", value);
+  const setEnd = (value: AiDraft["end"]) => updateDraft("end", value);
+  const setWindowLyrics = (value: AiDraft["windowLyrics"]) =>
+    updateDraft("windowLyrics", value);
+  const setInfillLyrics = (value: AiDraft["infillLyrics"]) =>
+    updateDraft("infillLyrics", value);
+  const setFade = (value: AiDraft["fade"]) => updateDraft("fade", value);
+  const readOnly = !!project.archivedAt;
+  const saveDraft = useCallback((): Promise<void> => {
+    if (savingDraft.current) return savingDraft.current;
+    if (readOnly || savedDraft.current === JSON.stringify(latestDraft.current))
+      return Promise.resolve();
+    setDraftStatus("saving");
+    setDraftError("");
+    const operation = (async () => {
+      while (savedDraft.current !== JSON.stringify(latestDraft.current)) {
+        const snapshot = JSON.stringify(latestDraft.current);
+        await api(`projects/${project.id}/ai-draft`, {
+          kind,
+          draft: JSON.parse(snapshot),
+        });
+        // Refresh parent state before a tab/project switch can remount this form.
+        await refresh();
+        savedDraft.current = snapshot;
       }
-    });
-  const [model, setModel] = useState("suno-v6"),
-    [lyrics, setLyrics] = useState(project.lyricsDraft),
-    [description, setDescription] = useState(
-      "保留参考旋律的走向，创作有完整结构的歌曲",
-    ),
-    [weight, setWeight] = useState(0.7),
-    [instrumental, setInstrumental] = useState(false);
-  const [start, setStart] = useState(0),
-    [end, setEnd] = useState(10),
-    [windowLyrics, setWindowLyrics] = useState(""),
-    [infillLyrics, setInfillLyrics] = useState(""),
-    [fade, setFade] = useState(30);
+      setDraftStatus("saved");
+    })()
+      .catch((error) => {
+        setDraftStatus("error");
+        setDraftError(
+          "AI 草稿保存失败，内容仍保留在当前页面。请重试保存后再离开。",
+        );
+        throw error;
+      })
+      .finally(() => {
+        savingDraft.current = null;
+      });
+    savingDraft.current = operation;
+    return operation;
+  }, [project.id, kind, readOnly, refresh]);
+  useEffect(() => {
+    onBeforeLeaveChange(saveDraft);
+    return () => onBeforeLeaveChange(null);
+  }, [saveDraft, onBeforeLeaveChange]);
+  useEffect(() => {
+    if (readOnly || savedDraft.current === JSON.stringify(draft)) return;
+    const timer = setTimeout(() => {
+      void saveDraft().catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [draft, readOnly, saveDraft]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (savedDraft.current !== JSON.stringify(latestDraft.current))
+        event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
   const pending = useRef<{ fingerprint: string; id: string } | null>(null);
   const sources = cover ? project.hums : project.versions,
     selected = sources.find((s) => s.id === sourceId);
@@ -249,12 +365,7 @@ export default function AiStudio({
     onLockChange(busy);
     return () => onLockChange(false);
   }, [busy, onLockChange]);
-  useEffect(() => {
-    if (!cover && selected) {
-      setStart(0);
-      setEnd(Math.min(10, selected.durationSec));
-    }
-  }, [sourceId, cover]);
+
   const invalid =
     !sourceId ||
     !title.trim() ||
@@ -271,6 +382,7 @@ export default function AiStudio({
     setError("");
     setNotice("");
     try {
+      await saveDraft();
       const request = cover
         ? {
             kind,
@@ -357,6 +469,32 @@ export default function AiStudio({
             </span>
             <h2>{cover ? "AI 哼唱成曲" : "AI 段落重写"}</h2>
           </div>
+          <div className="ai-draft-status">
+            <span role="status" aria-label="AI 草稿保存状态">
+              {draftStatus === "saved"
+                ? "AI 草稿已保存"
+                : draftStatus === "saving"
+                  ? "正在保存 AI 草稿…"
+                  : draftStatus === "error"
+                    ? "AI 草稿未保存"
+                    : "AI 草稿待保存"}
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              disabled={
+                readOnly || draftStatus === "saved" || draftStatus === "saving"
+              }
+              onClick={() => void saveDraft().catch(() => {})}
+            >
+              保存 AI 草稿
+            </button>
+          </div>
+          {draftError && (
+            <p className="job-error" role="alert">
+              {draftError}
+            </p>
+          )}
           <form onSubmit={submit}>
             <fieldset disabled={busy || !!project.archivedAt}>
               <div className="field">
@@ -367,7 +505,19 @@ export default function AiStudio({
                   id="ai-source"
                   required
                   value={sourceId}
-                  onChange={(e) => setSourceId(e.target.value)}
+                  onChange={(e) => {
+                    setSourceId(e.target.value);
+                    if (!cover) {
+                      setStart(0);
+                      setEnd(
+                        Math.min(
+                          10,
+                          project.versions.find((v) => v.id === e.target.value)
+                            ?.durationSec || 10,
+                        ),
+                      );
+                    }
+                  }}
                 >
                   <option value="">
                     {cover ? "请选择已保存的哼唱" : "请选择歌曲版本"}
@@ -422,7 +572,9 @@ export default function AiStudio({
                   <select
                     id="ai-model"
                     value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    onChange={(e) =>
+                      setModel(aiDraftSchema.shape.model.parse(e.target.value))
+                    }
                   >
                     <option>suno-v6</option>
                     <option>suno-v6-wild</option>
@@ -452,7 +604,7 @@ export default function AiStudio({
                       onChange={(e) => setDescription(e.target.value)}
                     />
                     <p className="hint">
-                      填写歌词时，服务使用歌词作为主提示；创作要求只在歌词留空时生效。
+                      非纯音乐且填写歌词时，服务使用歌词作为主提示；否则使用创作要求。
                     </p>
                   </div>
                   <div className="field">
@@ -533,12 +685,15 @@ export default function AiStudio({
                 <textarea
                   id="ai-lyrics"
                   required={!cover}
+                  disabled={cover && instrumental}
                   maxLength={8000}
                   value={lyrics}
                   onChange={(e) => setLyrics(e.target.value)}
                   placeholder={
                     cover
-                      ? "留空时按创作要求生成；歌词内容可能影响旋律遵循。"
+                      ? instrumental
+                        ? "纯音乐不发送歌词，取消勾选后可继续编辑。"
+                        : "留空时按创作要求生成；歌词内容可能影响旋律遵循。"
                       : "填写整首歌词，供服务定位和重写段落。"
                   }
                 />

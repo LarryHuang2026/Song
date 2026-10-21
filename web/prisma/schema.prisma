@@ -10,6 +10,8 @@ model Project {
   name String
   lyricsDraft String @default("")
   promptDraft String @default("{}")
+  aiCoverDraft String @default("{}")
+  aiRewriteDraft String @default("{}")
   selectedVersionId String?
   archivedAt DateTime?
   createdAt DateTime @default(now())

@@ -20,7 +20,7 @@ process.env.SUNO_API_KEY = "";
 const { db } = await import("../src/lib/db");
 const { saveSunoKey, publicSunoSettings } =
   await import("../src/lib/ai-settings");
-const { aiRequestSchema } = await import("../src/lib/ai-domain");
+const { aiRequestSchema, aiDraftSchema } = await import("../src/lib/ai-domain");
 const { processAiJob } = await import("../src/worker/ai-engine");
 const { recoverJobs } = await import("../src/worker/engine");
 const { saveAudio, makeDemoWav } = await import("../src/lib/audio");
@@ -120,6 +120,30 @@ describe("AI 服务配置", () => {
     saveSunoKey("", null, true);
     expect(publicSunoSettings().configured).toBe(false);
   });
+  it("草稿允许未完成的输入，但拒绝额外字段和过长文本", () => {
+    const draft = {
+      sourceId: "",
+      title: "",
+      style: "",
+      model: "suno-v6",
+      lyrics: "",
+      description: "",
+      weight: 0.7,
+      instrumental: false,
+      start: 10,
+      end: 0,
+      windowLyrics: "",
+      infillLyrics: "",
+      fade: 30,
+    };
+    expect(aiDraftSchema.parse(draft).end).toBe(0);
+    expect(() =>
+      aiDraftSchema.parse({ ...draft, apiKey: "not-a-draft-field" }),
+    ).toThrow();
+    expect(() =>
+      aiDraftSchema.parse({ ...draft, lyrics: "x".repeat(8001) }),
+    ).toThrow();
+  });
   it("拒绝过短 AI 重写区间和越界音频权重", () => {
     expect(() =>
       aiRequestSchema.parse({
@@ -146,6 +170,35 @@ describe("AI 服务配置", () => {
   });
 });
 describe("真实协议模拟（没有外部调用）", () => {
+  it("纯音乐不把保留的歌词当作主提示发送", async () => {
+    const { submitSuno } = await import("../src/lib/suno-provider");
+    const input = aiRequestSchema.parse({
+      kind: "hum_cover",
+      humId: crypto.randomUUID(),
+      title: "纯音乐",
+      style: "钢琴",
+      description: "安静的钢琴器乐",
+      lyrics: "这句歌词不能被发送",
+      instrumental: true,
+    });
+    const fake = vi.fn().mockResolvedValue(
+      json({
+        code: 200,
+        data: {
+          clips: [{ song_id: "instrumental-test", status: "pending" }],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fake);
+    await submitSuno(input, "source-test");
+    const sent = JSON.parse(fake.mock.calls[0][1].body);
+    expect(sent.instrumental).toBe(true);
+    expect(sent.customMode).toBe(false);
+    expect(sent.prompt).toBe("安静的钢琴器乐");
+    expect(JSON.stringify(sent)).not.toContain("这句歌词不能被发送");
+    expect(fake).toHaveBeenCalledTimes(1);
+  });
+
   it("上传 → 收费受理 → 重启恢复查询 → 下载，只提交一次生成", async () => {
     const { job, input } = await createJob();
     let polls = 0;

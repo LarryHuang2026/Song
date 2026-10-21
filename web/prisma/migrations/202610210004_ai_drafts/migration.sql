@@ -1,0 +1,2 @@
+ALTER TABLE "Project" ADD COLUMN "aiCoverDraft" TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE "Project" ADD COLUMN "aiRewriteDraft" TEXT NOT NULL DEFAULT '{}';

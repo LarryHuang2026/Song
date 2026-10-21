@@ -1546,3 +1546,58 @@ progress {
     transition: none !important;
   }
 }
+
+.vocal-conflict {
+  padding: 12px;
+  margin-top: 10px;
+  background: #fff5e8;
+  border: 1px solid #e6c59f;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #835533;
+}
+.vocal-conflict p {
+  line-height: 1.7;
+  margin: 7px 0 10px;
+}
+.prompt-preview {
+  margin: 0 22px 18px;
+  font-size: 11px;
+  color: #69715f;
+}
+.prompt-preview summary {
+  cursor: pointer;
+}
+.prompt-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  background: #f8f8f3;
+  border-radius: 6px;
+}
+
+.preset-choices button.preset-toggle {
+  background: transparent;
+  border-color: transparent;
+  color: #a56d49;
+}
+.preset-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.vocal-profile-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #828b76;
+  margin: 8px 0 0;
+}
+.custom-vocal {
+  margin-top: 10px;
+}
+.custom-vocal label {
+  font-size: 11px;
+}
+.vocal-quick {
+  margin-top: 8px;
+}

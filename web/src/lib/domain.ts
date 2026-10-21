@@ -1,44 +1,54 @@
 import { z } from "zod";
 import { redactSecrets } from "./secrets";
+import { vocalConflicts, vocalInstruction } from "./vocal";
 export const models = [
   "suno",
   "Lyria-3.5音频音乐",
   "Lyria-3pro音频音乐",
 ] as const;
-export const generationSchema = z
-  .object({
-    provider: z.enum(["fluxport", "mock"]).default("mock"),
-    model: z.enum(models).default("suno"),
-    lyrics: z.string().max(8000).default(""),
-    description: z.string().trim().min(1, "请填写创作描述").max(2000),
-    style: z.string().max(200).default(""),
-    mood: z.string().max(200).default(""),
-    vocal: z.string().max(100).default(""),
-    instruments: z.string().max(200).default(""),
-    duration: z.number().int().min(15).max(300).default(180),
-    instrumental: z.boolean().default(false),
-    sourceJobId: z.string().uuid().optional(),
-    parentVersionId: z.string().uuid().optional(),
-  })
-  .superRefine((v, ctx) => {
+export const generationSnapshotSchema = z.object({
+  provider: z.enum(["fluxport", "mock"]).default("mock"),
+  model: z.enum(models).default("suno"),
+  lyrics: z.string().max(8000).default(""),
+  description: z.string().trim().min(1, "请填写创作描述").max(2000),
+  style: z.string().max(200).default(""),
+  mood: z.string().max(200).default(""),
+  vocal: z.string().max(100).default(""),
+  instruments: z.string().max(200).default(""),
+  duration: z.number().int().min(15).max(300).default(180),
+  instrumental: z.boolean().default(false),
+  sourceJobId: z.string().uuid().optional(),
+  parentVersionId: z.string().uuid().optional(),
+});
+export const generationSchema = generationSnapshotSchema.superRefine(
+  (v, ctx) => {
+    for (const conflict of vocalConflicts(v))
+      ctx.addIssue({
+        code: "custom",
+        path: [conflict.field],
+        message: `${conflict.label}中的「${conflict.terms.join("、")}」与演唱选项冲突，请先清除冲突要求`,
+      });
     if (buildPrompt(v).length > 10000)
       ctx.addIssue({
         code: "custom",
         message: "合并后的提示词不能超过 10000 字符",
       });
-  });
+  },
+);
 export type GenerationRequest = z.infer<typeof generationSchema>;
 export function buildPrompt(
   v: Omit<GenerationRequest, "provider" | "model">,
 ): string {
+  const voice = vocalInstruction(v);
   return [
+    voice && `【优先演唱设定】${voice}`,
     v.description,
     `目标时长：约 ${v.duration} 秒。请创作有完整结构的音乐。`,
     v.style && `风格：${v.style}`,
     v.mood && `情绪：${v.mood}`,
-    v.instrumental ? "纯音乐，不要人声。" : v.vocal && `演唱：${v.vocal}`,
     v.instruments && `乐器：${v.instruments}`,
     !v.instrumental && v.lyrics && `歌词（请按词演唱）：\n${v.lyrics}`,
+    voice && `【最终演唱要求】${voice}`,
   ]
     .filter(Boolean)
     .join("\n");

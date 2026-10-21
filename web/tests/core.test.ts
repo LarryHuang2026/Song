@@ -11,6 +11,8 @@ const { db } = await import("../src/lib/db");
 const { generationSchema, buildPrompt, redact } =
   await import("../src/lib/domain");
 const { processJob, recoverJobs } = await import("../src/worker/engine");
+const { vocalConflicts, clearVocalConflicts } =
+  await import("../src/lib/vocal");
 const { extractLinks, generate, ProviderError } =
   await import("../src/lib/provider");
 const { validateRemoteUrl, downloadAudio } =
@@ -67,6 +69,104 @@ describe("领域约束与接口结果", () => {
       instrumental: true,
     });
     expect(buildPrompt(value)).not.toContain("不使用这句歌词");
+  });
+  it("女声设定识别英文男中音冲突，清除后保留风格与歌词并优先传递女声", () => {
+    const input = {
+      description:
+        "Nostalgic Mandarin retro pop ballad, intimate mellow male baritone vocal, warm acoustic guitar",
+      vocal: "清澈女声",
+      lyrics: "歌词里的男声是叙事的一部分",
+    };
+    expect(() => generationSchema.parse(input)).toThrow(/冲突/);
+    const draft = {
+      ...generationSchema.parse({ description: "暂存" }),
+      ...input,
+    };
+    expect(vocalConflicts(draft)[0].terms).toEqual(["male baritone vocal"]);
+    const fixed = clearVocalConflicts(draft);
+    expect(fixed.description).toContain("warm acoustic guitar");
+    expect(fixed.description).not.toMatch(/\bmale\b|baritone/i);
+    expect(fixed.lyrics).toBe(input.lyrics);
+    const prompt = buildPrompt(generationSchema.parse(fixed));
+    expect(prompt).toMatch(/^【优先演唱设定】.*female solo lead vocals/);
+    expect(prompt).toMatch(/【最终演唱要求】.*female solo lead vocals/);
+    expect(prompt).toContain(input.lyrics);
+    expect(
+      vocalConflicts({
+        ...fixed,
+        description: "warm female vocals, no male vocals",
+      }),
+    ).toEqual([]);
+    expect(
+      vocalConflicts({
+        ...fixed,
+        vocal: "男女对唱",
+        description: "male and female vocals",
+      }),
+    ).toEqual([]);
+  });
+  it("年轻声线带入具体音色提示，对唱和自定义声线不被强制改成独唱", () => {
+    const young = buildPrompt(
+      generationSchema.parse({
+        description: "轻快的流行歌",
+        vocal: "清甜少女感女声",
+      }),
+    );
+    expect(young).toContain("female solo lead vocals");
+    expect(young).toContain("youthful young-adult tone");
+    expect(young).toContain("sweet and light");
+    const boy = buildPrompt(
+      generationSchema.parse({
+        description: "校园流行歌",
+        vocal: "清透少年感男声",
+      }),
+    );
+    expect(boy).toContain("light clear tenor");
+    const duet = buildPrompt(
+      generationSchema.parse({
+        description: "两位女声交替演唱",
+        vocal: "女声二重唱",
+      }),
+    );
+    expect(duet).toContain("female duet");
+    expect(duet).not.toContain("solo");
+    const custom = "中性偏轻的音色，两位主唱轮流叙事，少颤音";
+    const free = buildPrompt(
+      generationSchema.parse({ description: "轻声叙事", vocal: custom }),
+    );
+    expect(free).toContain(custom);
+    expect(free).not.toContain("solo");
+    expect(() =>
+      generationSchema.parse({
+        description: "male baritone vocal",
+        vocal: "清甜少女感女声",
+      }),
+    ).toThrow(/冲突/);
+  });
+  it("纯音乐检测人声冲突，保留排除人声的描述；男声不会误匹配 female 子串", () => {
+    const instrumental = generationSchema.parse({
+      description: "钢琴，不使用人声，no vocals, vocal-free",
+      instrumental: true,
+    });
+    expect(vocalConflicts(instrumental)).toEqual([]);
+    expect(() =>
+      generationSchema.parse({
+        description: "清澈女声演唱",
+        instrumental: true,
+      }),
+    ).toThrow(/冲突/);
+    expect(() =>
+      generationSchema.parse({
+        description: "female lead vocals",
+        vocal: "温暖男声",
+      }),
+    ).toThrow(/冲突/);
+    expect(
+      generationSchema.parse({
+        description: "female vocals",
+        vocal: "清澈女声",
+      }).vocal,
+    ).toBe("清澈女声");
   });
   it("兼容 Suno Markdown 与 Lyria data 结构并去重", () => {
     expect(
@@ -193,11 +293,75 @@ describe("真实 Provider 协议（模拟 HTTP，不访问外部）", () => {
       expect(fake).toHaveBeenCalledTimes(1);
       const body = JSON.parse(fake.mock.calls[0][1].body);
       expect(body.stream).toBe(false);
-      expect(Object.keys(body).sort()).toEqual(["messages", "model", "stream"]);
+      expect(Object.keys(body).sort()).toEqual([
+        "messages",
+        "model",
+        "n",
+        "stream",
+      ]);
+      expect(body.n).toBe(1);
       expect(body.messages[0].content).toContain("你好");
       expect(body.messages[0].content).toContain("300");
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+  it("400 保留平台错误与请求编号，过滤密钥和链接且不重新生成", async () => {
+    const fake = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            message:
+              "prompt too long; test-only-key https://example.com/audio?signature=private",
+            code: "invalid_request",
+          },
+          request: { authorization: "test-only-key" },
+        }),
+        { status: 400, headers: { "x-request-id": "trace-rejected-1" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fake);
+    try {
+      const job = await createJob("fluxport");
+      await processJob(job.id);
+      const saved = await db.generationJob.findUniqueOrThrow({
+        where: { id: job.id },
+      });
+      expect(saved.status).toBe("failed");
+      expect(saved.requestId).toBe("trace-rejected-1");
+      expect(saved.errorMessage).toContain("prompt too long");
+      expect(saved.errorMessage).not.toContain("test-only-key");
+      expect(saved.errorMessage).not.toContain("https://");
+      expect(saved.errorMessage).not.toContain("signature=");
+      expect(fake).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("不展示 HTML、非 JSON 和超长错误响应", async () => {
+    const request = generationSchema.parse({
+      description: "测试歌曲",
+      provider: "fluxport",
+    });
+    for (const body of [
+      "<html>private upstream details</html>",
+      JSON.stringify({ error: { message: "x".repeat(17000) } }),
+    ]) {
+      const fake = vi
+        .fn()
+        .mockResolvedValue(new Response(body, { status: 400 }));
+      vi.stubGlobal("fetch", fake);
+      try {
+        const error = await generate(request).catch((e) => e);
+        expect(error).toBeInstanceOf(ProviderError);
+        expect(error.uncertain).toBe(false);
+        expect(error.message).toContain("平台未返回可安全显示的错误说明");
+        expect(error.message).not.toContain("private upstream details");
+        expect(error.message.length).toBeLessThan(200);
+        expect(fake).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     }
   });
   it("网络中断/5xx/成功但结果不可读都保留未知状态；鉴权失败为明确失败", async () => {
@@ -231,6 +395,36 @@ describe("真实 Provider 协议（模拟 HTTP，不访问外部）", () => {
   });
 });
 describe("任务、音频和崩溃恢复", () => {
+  it("无效排队参数明确失败，不阻塞后续队列；旧下载任务仍可恢复", async () => {
+    const invalid = await createJob();
+    await db.generationJob.update({
+      where: { id: invalid.id },
+      data: { requestParams: "not json" },
+    });
+    await processJob(invalid.id);
+    expect(
+      (await db.generationJob.findUniqueOrThrow({ where: { id: invalid.id } }))
+        .status,
+    ).toBe("failed");
+    const existing = await createJob();
+    const params = {
+      ...JSON.parse(existing.requestParams),
+      description: "male baritone vocal",
+      vocal: "清澈女声",
+    };
+    await db.generationJob.update({
+      where: { id: existing.id },
+      data: { status: "downloading", requestParams: JSON.stringify(params) },
+    });
+    await db.jobOutput.create({
+      data: { jobId: existing.id, index: 0, remoteUrl: "demo:0" },
+    });
+    await processJob(existing.id);
+    expect(
+      (await db.generationJob.findUniqueOrThrow({ where: { id: existing.id } }))
+        .status,
+    ).toBe("succeeded");
+  });
   it("无效导入不留下半写入的音频文件", async () => {
     const before = await readdir(path.join(dataRoot, "audio")).catch(() => []);
     await expect(

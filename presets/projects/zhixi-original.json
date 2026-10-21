@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "key": "zhixi-original",
+  "name": "芷溪",
+  "lyricsDraft": "[Title]\n芷溪\n\n[Long Instrumental Intro]\n\n[Verse 1 — Soft, Slow, Conversational]\n群山深处，溪水流淌\n藏着我梦里的故乡\n溪畔芷草，轻轻摇曳\n人们便叫这里芷溪\n\n青瓦白墙，雕花木窗\n鹅卵石路，弯弯又长\n百年古宅，静静守望\n守着多少旧日时光\n\n[Verse 2 — Intimate, Reflective]\n青苔爬上，巷口老墙\n田埂稻香，随风飘荡\n谁家老人，摇椅轻晃\n孩童的笑声还在耳旁\n\n我沿着小溪，慢慢走过\n仿佛又看见儿时的我\n清清流水，依旧唱着\n那些回不去的旧时光\n\n[Instrumental Interlude — Piano and Clean Electric Guitar, 15–20 Seconds]\n\n[Chorus — Gentle, Restrained]\n山还是那座山，溪还是那条溪\n走过多少路，看过多少风光\n最难忘还是你温暖的模样\n\n古巷深处，还飘着旧时的香\n纵然我远走，天涯路漫长\n梦醒时分，你仍在我心上\n\n[Instrumental Interlude — Slow Piano Motif, 15–20 Seconds]\n\n[Verse 3 — Gradually Building Emotion]\n每逢正月，花灯点亮\n锣鼓声声，唤醒了街巷\n人潮两旁，灯火摇晃\n纸包火映红一张张脸庞\n\n那一夜里，人声回荡\n多少游子回到老地方\n熟悉的笑，熟悉的乡音\n一声问候，就热了眼眶\n\n[Bridge — Warm, Nostalgic, No Big Orchestration]\n老樟树下，讲着过往\n溪水记得先辈的模样\n耕读传家，薪火绵长\n文臣武将，曾从这里启航\n\n岁月走远，根脉不忘\n客家人的心，连着故乡\n无论明天，身在何方\n心里的芷溪，从未遗忘\n\n[Instrumental Break — Piano, Acoustic Guitar, Gentle Bass, 20 Seconds]\n\n[Final Chorus — Slightly Fuller, Still Understated]\n山还是那座山，溪还是那条溪\n走过多少路，看过多少风光\n最难忘还是你温暖的模样\n\n古巷深处，还飘着旧时的香\n纵然我远走，天涯路漫长\n我的根，永远在芷溪\n\n[Final Chorus Reprise — Softer, More Intimate]\n山还是那座山，溪还是那条溪\n走过多少路，看过多少风光\n最难忘还是你温暖的模样\n\n古巷深处，还飘着旧时的香\n纵然我远走，天涯路漫长\n我的根，永远在芷溪\n\n[Outro — Slow Piano, Gentle Guitar, Long Fade Out]\n溪水悠悠，岁月悠长\n无论我走到什么地方\n你永远是我心中最美的地方\n\n[Extended Instrumental Outro — Piano and Guitar Fade Out]",
+  "promptDraft": {
+    "provider": "fluxport",
+    "model": "Lyria-3pro音频音乐",
+    "description": "为客家故乡芷溪创作一首原创中文思乡歌曲，目标总时长约4分45秒。以民族流行和当代民谣为底色，呈现群山、溪水、芷草、古巷、花灯与归乡记忆。约76 BPM，慢中板、轻微摇曳律动；旋律带自然的五声性色彩，主歌像在轻声讲述，副歌旋律舒展、句尾留白，有山谷回响般的空间感。年轻成人女声独唱为主，音色清亮、轻盈、通透，自然真声与轻头声衔接，少量民歌装饰音和柔和滑音，咬字清晰。木吉他和钢琴支撑，竹笛只在句间回应，贝斯与轻手鼓渐入，弦乐稀疏铺底，最后一遍副歌加轻柔女声和声。花灯段落稍添流动感，但不做喧闹庆典编曲。前奏约10–15秒，各间奏约8–12秒，尾奏约10秒；歌词标签里的长间奏应按总时长适当压缩，保留主要歌词和完整副歌。情绪从亲近、克制到温暖舒展，避免厚重胸声、浓重颤音、喊唱、重摇滚和电子舞曲大落差；使用原创旋律。",
+    "style": "民族流行、当代民谣、山野空灵、五声性旋律、轻摇曳律动",
+    "mood": "思乡、温暖、清澈、辽阔、含蓄、归属感",
+    "vocal": "年轻成人女声，清亮通透、轻盈偏高音区，自然真声与轻头声衔接，少量民歌装饰音，咬字清晰，长音舒展；避免厚重胸声、沙哑和浓重颤音",
+    "instruments": "木吉他、钢琴、竹笛、柔和贝斯、轻手鼓、稀疏弦乐、轻柔女声和声",
+    "duration": 285,
+    "instrumental": false
+  }
+}

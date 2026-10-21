@@ -176,3 +176,14 @@
     gap: 8px;
   }
 }
+
+.ai-draft-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 11px;
+  color: #7b846e;
+}

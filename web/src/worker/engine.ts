@@ -1,5 +1,9 @@
 import { db } from "../lib/db";
-import { generationSchema, redact } from "../lib/domain";
+import {
+  generationSchema,
+  generationSnapshotSchema,
+  redact,
+} from "../lib/domain";
 import { generate, ProviderError } from "../lib/provider";
 import { downloadAudio } from "../lib/download";
 import { makeDemoWav, saveAudio } from "../lib/audio";
@@ -23,7 +27,23 @@ export async function recoverJobs() {
 export async function processJob(id: string) {
   let job = await db.generationJob.findUniqueOrThrow({ where: { id } });
   if (job.provider === "suno-api") return processAiJob(id);
-  const request = generationSchema.parse(JSON.parse(job.requestParams));
+  let request;
+  try {
+    request = (
+      job.status === "queued" ? generationSchema : generationSnapshotSchema
+    ).parse(JSON.parse(job.requestParams));
+  } catch {
+    await db.generationJob.update({
+      where: { id },
+      data: {
+        status: "failed",
+        errorMessage:
+          "任务参数无效或存在冲突，请载入参数修正后新建任务；未重新提交生成。",
+        finishedAt: new Date(),
+      },
+    });
+    return;
+  }
   if (job.status === "queued") {
     const claimed = await db.generationJob.updateMany({
       where: { id, status: "queued" },
@@ -52,6 +72,7 @@ export async function processJob(id: string) {
               ? "failed"
               : "unknown_submission",
           errorMessage: redact(error instanceof Error ? error.message : error),
+          requestId: error instanceof ProviderError ? error.requestId : null,
           finishedAt: new Date(),
         },
       });

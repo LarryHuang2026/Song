@@ -11,7 +11,21 @@ const terminalSuccess = new Set(["completed", "complete", "succeeded"]),
   terminalFailure = new Set(["error", "failed", "cancelled"]);
 export async function processAiJob(id: string) {
   let job = await db.generationJob.findUniqueOrThrow({ where: { id } });
-  const input = aiRequestSchema.parse(JSON.parse(job.requestParams));
+  let input;
+  try {
+    input = aiRequestSchema.parse(JSON.parse(job.requestParams));
+  } catch {
+    await db.generationJob.update({
+      where: { id },
+      data: {
+        status: "failed",
+        errorMessage:
+          "任务参数无效或存在冲突，请载入参数修正后新建任务；未重新提交生成。",
+        finishedAt: new Date(),
+      },
+    });
+    return;
+  }
   if (job.status === "queued") {
     if (
       !(

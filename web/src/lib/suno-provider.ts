@@ -117,6 +117,10 @@ export async function submitSuno(request: AiRequest, sourceId: string) {
     request.kind === "hum_cover"
       ? "/api/music/generate-from-source"
       : "/api/music/replace-section";
+  const lyrics =
+    request.kind === "hum_cover" && !request.instrumental
+      ? request.lyrics.trim()
+      : "";
   const body =
     request.kind === "hum_cover"
       ? {
@@ -124,8 +128,8 @@ export async function submitSuno(request: AiRequest, sourceId: string) {
           sourceClipId: sourceId,
           title: request.title,
           style: request.style,
-          customMode: !!request.lyrics.trim(),
-          prompt: request.lyrics.trim() || request.description,
+          customMode: !!lyrics,
+          prompt: lyrics || request.description,
           instrumental: request.instrumental,
           audio_weight: request.audioWeight,
           waitAudio: false,

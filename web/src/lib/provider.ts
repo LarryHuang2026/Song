@@ -1,14 +1,66 @@
 import { z } from "zod";
 import { config } from "./config";
-import { buildPrompt, type GenerationRequest } from "./domain";
+import { buildPrompt, redact, type GenerationRequest } from "./domain";
 export class ProviderError extends Error {
   constructor(
     message: string,
     public uncertain: boolean,
+    public requestId: string | null = null,
   ) {
     super(message);
   }
 }
+// Read only a bounded JSON error envelope. Never persist the raw response,
+// HTML error pages, request echoes, headers, or signed result URLs.
+async function errorDetail(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > 16384) return "";
+      chunks.push(value);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const error = body?.error;
+    const message =
+      typeof error === "string"
+        ? error
+        : typeof error?.message === "string"
+          ? error.message
+          : typeof body?.message === "string"
+            ? body.message
+            : "";
+    if (!message) return "";
+    return redact(message.split(config.apiKey).join("[REDACTED]"))
+      .replace(/https?:\/\/[^\s<>"']+/gi, "[链接已隐藏]")
+      .replace(
+        /((?:api[_ -]?key|access[_ -]?token|authorization|password|密钥)\s*[:=]\s*)[^\s,;，；]+/gi,
+        "$1[REDACTED]",
+      )
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .slice(0, 500);
+  } catch {
+    return "";
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+function errorRequestId(response: Response) {
+  const id = response.headers.get("x-request-id");
+  return id &&
+    /^[a-zA-Z0-9._:-]{1,160}$/.test(id) &&
+    !id.includes(config.apiKey) &&
+    !/^sk-/i.test(id)
+    ? id
+    : null;
+}
+
 const responseSchema = z.object({
   choices: z
     .array(z.object({ message: z.object({ content: z.string().nullish() }) }))
@@ -56,6 +108,7 @@ export async function generate(request: GenerationRequest) {
       },
       body: JSON.stringify({
         model: request.model,
+        n: 1,
         stream: false,
         messages: [{ role: "user", content: buildPrompt(request) }],
       }),
@@ -69,10 +122,12 @@ export async function generate(request: GenerationRequest) {
     );
   }
   if (!response.ok) {
-    // Never return upstream bodies: they can echo credentials or signed URLs.
+    const detail = await errorDetail(response);
+    const requestId = errorRequestId(response);
     throw new ProviderError(
-      `音乐接口返回 HTTP ${response.status}。请核对余额、限流和平台使用记录。`,
+      `音乐接口返回 HTTP ${response.status}。${detail ? `平台说明：${detail}` : "平台未返回可安全显示的错误说明。"}${requestId ? `（请求编号：${requestId}）` : ""} 请核对平台记录；不会自动重新生成。`,
       response.status >= 500 || response.status === 408,
+      requestId,
     );
   }
   try {

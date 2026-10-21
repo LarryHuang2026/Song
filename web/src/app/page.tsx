@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   AudioLines,
   Plus,
@@ -28,7 +28,20 @@ import {
   Copy,
   Square,
 } from "lucide-react";
-import { models, type GenerationRequest } from "@/lib/domain";
+import {
+  models,
+  activeStates,
+  buildPrompt,
+  type GenerationRequest,
+} from "@/lib/domain";
+import { vocalConflicts, clearVocalConflicts } from "@/lib/vocal";
+import {
+  creationPresets,
+  vocalProfiles,
+  vocalGroups,
+  quickVocalLabels,
+  vocalProfile,
+} from "@/lib/creative-presets";
 import LocalStudio, { type Hum } from "./local-studio";
 import AiStudio from "./ai-studio";
 type Workspace = "create" | "hums" | "edit" | "ai_cover" | "ai_replace";
@@ -72,6 +85,8 @@ type Project = {
   name: string;
   lyricsDraft: string;
   promptDraft: string;
+  aiCoverDraft: string;
+  aiRewriteDraft: string;
   selectedVersionId: string | null;
   archivedAt: string | null;
   versions: Version[];
@@ -95,11 +110,6 @@ const defaults: GenerationRequest = {
   instruments: "",
   duration: 180,
   instrumental: false,
-};
-const creationPresets = {
-  style: ["流行", "民谣", "爵士", "摇滚", "电子", "国风"],
-  mood: ["温暖", "松弛", "治愈", "欢快", "忧伤", "充满希望"],
-  instruments: ["钢琴", "木吉他", "弦乐", "鼓", "贝斯", "合成器"],
 };
 const descriptionPresets = [
   {
@@ -127,17 +137,24 @@ function PresetChoices({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
   const selected = value
     .split(/[、,，;；\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+  const visible = choices.filter(
+    (choice, index) => expanded || index < 6 || selected.includes(choice),
+  );
+  const hiddenCount = choices.length - visible.length;
   return (
     <div
+      id={id}
       className="inspiration-chips preset-choices"
       role="group"
       aria-label={`${label}常用选项`}
     >
-      {choices.map((choice) => {
+      {visible.map((choice) => {
         const active = selected.includes(choice);
         const next = active
           ? selected.filter((item) => item !== choice)
@@ -155,6 +172,18 @@ function PresetChoices({
           </button>
         );
       })}
+      {(expanded || hiddenCount > 0) && (
+        <button
+          type="button"
+          className="preset-toggle"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? `收起${label}` : `更多${label}（${hiddenCount}）`}
+          <ChevronDown size={11} />
+        </button>
+      )}
     </div>
   );
 }
@@ -240,6 +269,7 @@ export default function Studio() {
     [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<GenerationRequest>(defaults),
     [dirty, setDirty] = useState(false);
+  const [customVocal, setCustomVocal] = useState(false);
   const [archived, setArchived] = useState(false),
     [query, setQuery] = useState("");
   const [newDialog, setNewDialog] = useState(false),
@@ -254,6 +284,13 @@ export default function Studio() {
   const [editBaseId, setEditBaseId] = useState<string>();
   const [tab, setTab] = useState<"versions" | "jobs">("versions"),
     [details, setDetails] = useState<string | null>(null);
+  const aiDraftSave = useRef<(() => Promise<void>) | null>(null);
+  const registerAiDraftSave = useCallback(
+    (save: (() => Promise<void>) | null) => {
+      aiDraftSave.current = save;
+    },
+    [],
+  );
   const fileInput = useRef<HTMLInputElement>(null),
     projectIdRef = useRef<string | null>(null);
   const pendingSubmission = useRef<{ fingerprint: string; id: string } | null>(
@@ -308,6 +345,7 @@ export default function Studio() {
         setForm({ ...defaults, ...draft, lyrics: p.lyricsDraft });
       } else setForm(defaults);
       setDirty(false);
+      setCustomVocal(false);
       setDetails(null);
       pendingSubmission.current = null;
     }
@@ -370,6 +408,7 @@ export default function Studio() {
     setBusy(true);
     setError("");
     try {
+      await aiDraftSave.current?.();
       await work();
     } catch (e) {
       setError((e as Error).message);
@@ -458,6 +497,7 @@ export default function Studio() {
   function reuse(params: string, jobId?: string, parentVersionId?: string) {
     const next = JSON.parse(params) as GenerationRequest;
     setForm({ ...defaults, ...next, sourceJobId: jobId, parentVersionId });
+    setCustomVocal(false);
     setDirty(true);
     setNotice("已载入创作参数，修改后可再次提交");
     document.getElementById("creative-description")?.focus();
@@ -475,15 +515,21 @@ export default function Studio() {
     });
     event.target.value = "";
   }
+  const chosenVocal = vocalProfile(form.vocal);
+  const isCustomVocal = customVocal || (!!form.vocal && !chosenVocal);
+  const voiceConflicts = vocalConflicts(form);
+  const promptText = buildPrompt(form);
+  const promptTooLong = promptText.length > 10000;
   const activeJobs =
-    project?.jobs.filter((j) =>
-      ["queued", "submitting", "downloading"].includes(j.status),
-    ).length || 0;
+    project?.jobs.filter((j) => activeStates.includes(j.status)).length || 0;
   const canGenerate =
     !busy &&
     !!project &&
     !archived &&
     !!form.description.trim() &&
+    !voiceConflicts.length &&
+    (form.instrumental || !isCustomVocal || !!form.vocal.trim()) &&
+    !promptTooLong &&
     (form.provider === "mock" || state.configured);
   return (
     <div className="app-shell">
@@ -826,6 +872,7 @@ export default function Studio() {
                   refresh={refresh}
                   navigate={(mode) => void launch(mode)}
                   onLockChange={setLocalLock}
+                  onBeforeLeaveChange={registerAiDraftSave}
                 />
               ) : workspace !== "create" ? (
                 <LocalStudio
@@ -921,18 +968,92 @@ export default function Studio() {
                             <div className="select-wrap">
                               <select
                                 id="vocal"
-                                value={form.vocal}
-                                disabled={form.instrumental}
-                                onChange={(e) =>
-                                  update("vocal", e.target.value)
+                                value={
+                                  isCustomVocal ? "__custom__" : form.vocal
                                 }
+                                disabled={form.instrumental}
+                                onChange={(e) => {
+                                  const custom =
+                                    e.target.value === "__custom__";
+                                  setCustomVocal(custom);
+                                  update("vocal", custom ? "" : e.target.value);
+                                }}
                               >
                                 <option value="">让 AI 选择</option>
-                                <option>温暖男声</option>
-                                <option>清澈女声</option>
-                                <option>男女对唱</option>
+                                {vocalGroups.map((group) => (
+                                  <optgroup key={group} label={group}>
+                                    {vocalProfiles
+                                      .filter(
+                                        (profile) => profile.group === group,
+                                      )
+                                      .map((profile) => (
+                                        <option
+                                          key={profile.label}
+                                          value={profile.label}
+                                        >
+                                          {profile.label}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                ))}
+                                <option value="__custom__">自定义声线…</option>
                               </select>
                               <ChevronDown size={14} />
+                            </div>
+                            {isCustomVocal ? (
+                              <div className="custom-vocal">
+                                <label htmlFor="custom-vocal">
+                                  自定义声线描述
+                                </label>
+                                <input
+                                  id="custom-vocal"
+                                  maxLength={100}
+                                  disabled={form.instrumental}
+                                  value={form.vocal}
+                                  onChange={(e) =>
+                                    update("vocal", e.target.value)
+                                  }
+                                  placeholder="如：年轻成人的清甜女声，轻声、少颤音，不要厚重唱腔"
+                                />
+                                <p className="hint">
+                                  描述音色、气息和唱法，最多 100 字。
+                                  {!form.vocal.trim() && !form.instrumental
+                                    ? "请填写后再生成。"
+                                    : ""}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="vocal-profile-note">
+                                {chosenVocal?.description ||
+                                  "可选年轻、轻柔、空灵等声线，也可自定义。"}
+                              </p>
+                            )}
+                            <div
+                              className="inspiration-chips preset-choices vocal-quick"
+                              role="group"
+                              aria-label="声线快捷选择"
+                            >
+                              {quickVocalLabels.map((label) => (
+                                <button
+                                  type="button"
+                                  key={label}
+                                  aria-pressed={
+                                    form.vocal === label && !isCustomVocal
+                                  }
+                                  disabled={form.instrumental}
+                                  onClick={() => {
+                                    setCustomVocal(false);
+                                    update("vocal", label);
+                                  }}
+                                >
+                                  {form.vocal === label && !isCustomVocal ? (
+                                    <Check size={11} />
+                                  ) : (
+                                    <Plus size={11} />
+                                  )}
+                                  {label}
+                                </button>
+                              ))}
                             </div>
                           </div>
                           <div className="field">
@@ -954,6 +1075,36 @@ export default function Studio() {
                             />
                           </div>
                         </div>
+                        <p className="hint">
+                          演唱声音通过文字提示传达给模型，实际声线仍可能偏离设定。
+                        </p>
+                        {voiceConflicts.length > 0 && (
+                          <div className="vocal-conflict" role="alert">
+                            <strong>演唱要求有冲突</strong>
+                            <p>
+                              {voiceConflicts
+                                .map(
+                                  (c) =>
+                                    `${c.label}含「${c.terms.join("、")}」`,
+                                )
+                                .join("；")}
+                              ，与{form.instrumental ? "纯音乐" : form.vocal}
+                              不一致。请先修改，避免把冲突要求一起发送。
+                            </p>
+                            <button
+                              type="button"
+                              className="button small secondary"
+                              onClick={() => {
+                                setForm((previous) =>
+                                  clearVocalConflicts(previous),
+                                );
+                                setDirty(true);
+                              }}
+                            >
+                              清除冲突声线描述
+                            </button>
+                          </div>
+                        )}
                         <div className="section-divider" />
                         <div className="field lyrics-field">
                           <div className="label-row">
@@ -1073,6 +1224,16 @@ export default function Studio() {
                           </div>
                         </div>
                       </fieldset>
+                      {promptTooLong && (
+                        <p className="job-error" role="alert">
+                          合并后的提示词共 {promptText.length} 字符，超过 10000
+                          字符限制，请缩短描述或歌词。
+                        </p>
+                      )}
+                      <details className="prompt-preview">
+                        <summary>查看实际发送的提示词</summary>
+                        <pre>{promptText}</pre>
+                      </details>
                       <div className="submit-area">
                         <div className="generation-note">
                           <span>
@@ -1298,7 +1459,7 @@ export default function Studio() {
                                   {v.sourceType === "text_generate" && (
                                     <button
                                       className="text-button"
-                                      disabled={archived}
+                                      disabled={archived || busy}
                                       onClick={() =>
                                         reuse(v.paramsSnapshot, undefined, v.id)
                                       }
@@ -1383,9 +1544,12 @@ export default function Studio() {
                                 <span
                                   className={`job-status status-${job.status}`}
                                 >
-                                  {["submitting", "downloading"].includes(
-                                    job.status,
-                                  ) && (
+                                  {[
+                                    "uploading",
+                                    "submitting",
+                                    "running",
+                                    "downloading",
+                                  ].includes(job.status) && (
                                     <LoaderCircle size={12} className="spin" />
                                   )}
                                   {statusLabels[job.status] || job.status}
@@ -1478,7 +1642,7 @@ export default function Studio() {
                                 )}
                                 <button
                                   className="text-button"
-                                  disabled={archived}
+                                  disabled={archived || busy}
                                   onClick={() =>
                                     job.provider === "suno-api"
                                       ? void launch(
