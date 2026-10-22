@@ -52,6 +52,21 @@ node scripts/dev.mjs
 
 打开 http://127.0.0.1:3100 。启动脚本生成 Prisma Client、应用数据库迁移，再启动 Web、独立 worker，以及已安装的 Python 音频服务（127.0.0.1:8100）。仅监听本机。不要同时运行多个启动脚本或 worker。
 
+### 独立后台运行
+
+macOS 上可改用后台管理命令，终端退出后仍继续运行：
+
+```sh
+node scripts/service.mjs start
+node scripts/service.mjs status
+node scripts/service.mjs logs
+node scripts/service.mjs stop
+```
+
+`start` 会检查端口，选择与已安装 SQLite 原生模块兼容的 Node 运行时，再启动独立后台守护进程；重复执行不会启动第二个服务组。Web、Worker 或音频进程退出时，服务组停止并在 15 秒后重新启动。已提交而结果未知的生成任务不会自动重新提交。`stop` 等待当前任务安全退出，保留日志；超过一分钟仍未停止时会提示继续等待，不强杀任务。更新代码后使用 `node scripts/service.mjs restart`。
+
+日志位于 `data/logs/service.out.log` 和 `data/logs/service.err.log`，保存了启动时间、退出的服务名称、退出码和信号；PID 状态保存在 `data/service.json`，这些文件均不提交 Git。后台服务不是开机自启：电脑重启后需再执行 `start`。它无法在守护进程本身被系统终止、机器睡眠或关机时保证可用。
+
 默认选择**演示模式**：生成两段 8 秒的合成测试旋律，无歌词演唱、不调用 API。新建项目后即可验证全部本地流程。
 
 首次使用音频分析且没有 Python 虚拟环境时，先在项目根目录安装，然后重新运行启动脚本：
