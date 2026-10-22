@@ -30,6 +30,9 @@ import {
 } from "lucide-react";
 import {
   models,
+  modelLabel,
+  promptLimit,
+  isVersionedSuno,
   activeStates,
   buildPrompt,
   type GenerationRequest,
@@ -101,7 +104,7 @@ type State = {
 };
 const defaults: GenerationRequest = {
   provider: "mock",
-  model: "suno",
+  model: "suno-v6",
   lyrics: "",
   description: "",
   style: "",
@@ -519,7 +522,8 @@ export default function Studio() {
   const isCustomVocal = customVocal || (!!form.vocal && !chosenVocal);
   const voiceConflicts = vocalConflicts(form);
   const promptText = buildPrompt(form);
-  const promptTooLong = promptText.length > 10000;
+  const maxPrompt = promptLimit(form.model);
+  const promptTooLong = promptText.length > maxPrompt;
   const activeJobs =
     project?.jobs.filter((j) => activeStates.includes(j.status)).length || 0;
   const canGenerate =
@@ -1213,20 +1217,32 @@ export default function Studio() {
                               >
                                 {models.map((m) => (
                                   <option key={m} value={m}>
-                                    {m === "suno"
-                                      ? "Suno · 推荐"
-                                      : m.replace("音频音乐", "")}
+                                    {modelLabel(m)}
                                   </option>
                                 ))}
                               </select>
                               <ChevronDown size={14} />
                             </div>
+                            {isVersionedSuno(form.model) && (
+                              <p className="hint">
+                                当前版本每次返回 1 首，合并提示词最多 3000
+                                字符。V6 标准版适合明确的歌词与编曲要求；Wild
+                                偏探索，Mini 偏快速试稿。
+                              </p>
+                            )}
+                            {form.model === "suno" && (
+                              <p className="hint">
+                                旧入口未出现在本次 Key 的模型清单中，建议改选
+                                Suno V6。
+                              </p>
+                            )}
                           </div>
                         </div>
                       </fieldset>
                       {promptTooLong && (
                         <p className="job-error" role="alert">
-                          合并后的提示词共 {promptText.length} 字符，超过 10000
+                          合并后的提示词共 {promptText.length} 字符，超过{" "}
+                          {maxPrompt}
                           字符限制，请缩短描述或歌词。
                         </p>
                       )}
@@ -1239,7 +1255,7 @@ export default function Studio() {
                           <span>
                             {form.provider === "mock"
                               ? "演示模式 · 两段 8 秒合成旋律"
-                              : "预计 ¥0.20 / 次 · 不保证歌词逐字演唱"}
+                              : "按上游当前模型单价计费 · 不保证歌词逐字演唱"}
                           </span>
                           <button
                             className="save-button"

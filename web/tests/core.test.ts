@@ -269,7 +269,7 @@ describe("真实 Provider 协议（模拟 HTTP，不访问外部）", () => {
       }
     }
   });
-  it("只提交一次非流式请求，不把歌词和时长伪装为原生参数", async () => {
+  it("旧 Suno 入口保留非流式兼容，不把歌词和时长伪装为原生参数", async () => {
     const fake = vi
       .fn()
       .mockResolvedValue(
@@ -282,6 +282,7 @@ describe("真实 Provider 协议（模拟 HTTP，不访问外部）", () => {
     try {
       const request = generationSchema.parse({
         description: "钢琴",
+        model: "suno",
         provider: "fluxport",
         lyrics: "你好",
         duration: 300,

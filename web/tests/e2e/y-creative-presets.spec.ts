@@ -7,7 +7,24 @@ test("扩展创作选项、年轻声线及自定义声线可保存恢复", async
     await request.post("/api/projects", { data: { name: "丰富创作选项回归" } })
   ).json();
   await page.goto("/");
+  await expect(page.getByLabel("音乐模型", { exact: true })).toHaveValue(
+    "suno-v6",
+  );
+  for (const model of [
+    "suno-v5",
+    "suno-v5.5",
+    "suno-v6-mini",
+    "suno-v6-wild",
+    "suno-v6",
+  ])
+    await page.getByLabel("音乐模型", { exact: true }).selectOption(model);
   await page.getByLabel("创作描述").fill("轻快梦幻的青春流行歌");
+  await page.getByLabel("歌词", { exact: true }).fill("长".repeat(3100));
+  await expect(page.getByText(/超过 3000/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "体验一次创作", exact: true }),
+  ).toBeDisabled();
+  await page.getByLabel("歌词", { exact: true }).fill("原创的短歌词");
   const style = page.getByRole("group", { name: "音乐风格常用选项" });
   await page.getByLabel("音乐风格", { exact: true }).fill("自定义融合风格");
   await style.getByRole("button", { name: /更多音乐风格/ }).click();
@@ -66,6 +83,9 @@ test("扩展创作选项、年轻声线及自定义声线可保存恢复", async
     page.getByRole("button", { name: "草稿已保存", exact: true }),
   ).toBeVisible();
   await page.reload();
+  await expect(page.getByLabel("音乐模型", { exact: true })).toHaveValue(
+    "suno-v6",
+  );
   await expect(page.getByLabel("演唱声音")).toHaveValue("__custom__");
   await expect(page.getByLabel("自定义声线描述")).toHaveValue(custom);
   await expect(page.getByLabel("乐器偏好", { exact: true })).toHaveValue(

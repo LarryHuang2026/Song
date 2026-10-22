@@ -2,13 +2,32 @@ import { z } from "zod";
 import { redactSecrets } from "./secrets";
 import { vocalConflicts, vocalInstruction } from "./vocal";
 export const models = [
-  "suno",
+  "suno-v6",
+  "suno-v6-wild",
+  "suno-v6-mini",
+  "suno-v5.5",
+  "suno-v5",
   "Lyria-3.5音频音乐",
   "Lyria-3pro音频音乐",
+  "suno",
 ] as const;
+export const isVersionedSuno = (model: string) => model.startsWith("suno-v");
+export const promptLimit = (model: string) =>
+  isVersionedSuno(model) ? 3000 : 10000;
+export function modelLabel(model: string) {
+  const labels: Record<string, string> = {
+    "suno-v6": "Suno V6 · 推荐（标准版）",
+    "suno-v6-wild": "Suno V6 Wild · 实验探索",
+    "suno-v6-mini": "Suno V6 Mini · 快速试稿",
+    "suno-v5.5": "Suno V5.5",
+    "suno-v5": "Suno V5",
+    suno: "Suno · 旧入口（权限以平台为准）",
+  };
+  return labels[model] || model.replace("音频音乐", "");
+}
 export const generationSnapshotSchema = z.object({
   provider: z.enum(["fluxport", "mock"]).default("mock"),
-  model: z.enum(models).default("suno"),
+  model: z.enum(models).default("suno-v6"),
   lyrics: z.string().max(8000).default(""),
   description: z.string().trim().min(1, "请填写创作描述").max(2000),
   style: z.string().max(200).default(""),
@@ -28,10 +47,11 @@ export const generationSchema = generationSnapshotSchema.superRefine(
         path: [conflict.field],
         message: `${conflict.label}中的「${conflict.terms.join("、")}」与演唱选项冲突，请先清除冲突要求`,
       });
-    if (buildPrompt(v).length > 10000)
+    const limit = promptLimit(v.model);
+    if (buildPrompt(v).length > limit)
       ctx.addIssue({
         code: "custom",
-        message: "合并后的提示词不能超过 10000 字符",
+        message: `当前模型合并后的提示词不能超过 ${limit} 字符`,
       });
   },
 );

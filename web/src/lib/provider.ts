@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { config } from "./config";
-import { buildPrompt, redact, type GenerationRequest } from "./domain";
+import {
+  buildPrompt,
+  redact,
+  isVersionedSuno,
+  promptLimit,
+  type GenerationRequest,
+} from "./domain";
+import { readMusicStream } from "./music-sse";
 export class ProviderError extends Error {
   constructor(
     message: string,
@@ -98,6 +105,13 @@ export function extractLinks(value: unknown) {
 }
 export async function generate(request: GenerationRequest) {
   if (!config.apiKey) throw new ProviderError("未配置 FLUXPORT_API_KEY", false);
+  const prompt = buildPrompt(request);
+  if (prompt.length > promptLimit(request.model))
+    throw new ProviderError(
+      `当前模型提示词不能超过 ${promptLimit(request.model)} 字符；未提交生成。`,
+      false,
+    );
+  const versionedSuno = isVersionedSuno(request.model);
   let response: Response;
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -108,11 +122,12 @@ export async function generate(request: GenerationRequest) {
       },
       body: JSON.stringify({
         model: request.model,
-        n: 1,
-        stream: false,
-        messages: [{ role: "user", content: buildPrompt(request) }],
+        ...(versionedSuno || request.model === "suno" ? { n: 1 } : {}),
+        ...(versionedSuno ? { instrumental: request.instrumental } : {}),
+        stream: versionedSuno,
+        messages: [{ role: "user", content: prompt }],
       }),
-      signal: AbortSignal.timeout(request.model === "suno" ? 600000 : 660000),
+      signal: AbortSignal.timeout(660000),
       redirect: "error",
     });
   } catch {
@@ -131,16 +146,27 @@ export async function generate(request: GenerationRequest) {
     );
   }
   try {
+    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+      const content = await readMusicStream(response);
+      return {
+        urls: extractLinks({ choices: [{ message: { content } }] }),
+        requestId: errorRequestId(response),
+      };
+    }
     const body = await response.text();
     if (body.length > 1024 * 1024) throw new Error("响应过大");
+    const result = JSON.parse(body);
+    if (result.error || result.code === "music_result_unconfirmed")
+      throw new Error("音乐生成结果未确认");
     return {
-      urls: extractLinks(JSON.parse(body)),
+      urls: extractLinks(result),
       requestId: response.headers.get("x-request-id"),
     };
   } catch {
     throw new ProviderError(
       "接口返回成功，但未能解析音频结果。请核对平台记录；不会自动重新生成。",
       true,
+      errorRequestId(response),
     );
   }
 }
